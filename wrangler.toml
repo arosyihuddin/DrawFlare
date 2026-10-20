@@ -11,7 +11,7 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "drawflare-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "1847d86b-f0eb-4506-ace5-7b62d936b962"
 migrations_dir = "migrations"
 
 [[r2_buckets]]
