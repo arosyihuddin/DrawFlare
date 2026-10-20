@@ -1,5 +1,5 @@
 {
-  "name": "drawflare-worker",
+  "name": "drawflare",
   "private": true,
   "version": "0.1.0",
   "type": "module",

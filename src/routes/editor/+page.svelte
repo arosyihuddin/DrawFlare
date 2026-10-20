@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { confirmAction } from '$lib/confirm';
+  import { confirmAction, promptAction } from '$lib/confirm';
   import { onMount } from 'svelte';
   import ExcalidrawEditor from '$lib/ExcalidrawEditor.svelte';
 
@@ -8,7 +8,6 @@
   let title = $state('Untitled drawing');
   let revision = $state(1);
   let scene = $state<unknown>({ elements: [], appState: {}, files: {} });
-  let editorAutoHide = $state(false);
   let status = $state('Loading drawing…');
   let ready = $state(false);
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -202,13 +201,84 @@
     void persistScene();
   }
 
+  type ShareLink = { token: string; permission: 'view' | 'edit'; expires_at: string | null; created_at?: string };
+  let showShare = $state(false);
+  let shares = $state<ShareLink[]>([]);
+  let shareLoading = $state(false);
+  let shareError = $state('');
+  let creatingShare = $state(false);
+  let sharePermission = $state<'view' | 'edit'>('edit');
+  let shareExpiry = $state('never');
+
+  function formatExpiry(value: string | null) {
+    if (!value) return 'Never expires';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : 'Expires ' + parsed.toLocaleString();
+  }
+
+  async function refreshShares() {
+    if (!boardId) return;
+    shareLoading = true;
+    try {
+      const response = await fetch('/api/drawings/' + encodeURIComponent(boardId) + '/shares');
+      const data = await response.json() as ShareLink[] | { error?: string };
+      if (!response.ok || !Array.isArray(data)) throw new Error((data as { error?: string }).error || 'Could not load share links');
+      shares = data;
+    } catch (error) {
+      shareError = error instanceof Error ? error.message : 'Could not load share links';
+    } finally {
+      shareLoading = false;
+    }
+  }
+
+  async function openShare() {
+    if (!boardId) return;
+    showShare = true;
+    shares = [];
+    shareError = '';
+    await refreshShares();
+  }
+
+  async function createShare() {
+    if (!boardId || creatingShare) return;
+    creatingShare = true;
+    shareError = '';
+    try {
+      const body: { permission: 'view' | 'edit'; expiresInDays?: number } = { permission: sharePermission };
+      if (shareExpiry !== 'never') body.expiresInDays = Number(shareExpiry);
+      const response = await fetch('/api/drawings/' + encodeURIComponent(boardId) + '/shares', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await response.json() as { url?: string; error?: string };
+      if (!response.ok || !data.url) throw new Error(data.error || 'Could not create share link');
+      let copied = false;
+      try { await navigator.clipboard.writeText(data.url); copied = true; } catch { /* The link stays visible in the list below. */ }
+      await refreshShares();
+      shareError = copied ? 'Link created and copied to clipboard.' : 'Link created. Copy it from the list below.';
+    } catch (error) {
+      shareError = error instanceof Error ? error.message : 'Could not create share link';
+    } finally {
+      creatingShare = false;
+    }
+  }
+
+  async function copyShare(share: ShareLink) {
+    const url = location.origin + '/share/' + share.token;
+    try { await navigator.clipboard.writeText(url); shareError = 'Link copied to clipboard.'; }
+    catch { await promptAction('Copy the link below if clipboard access is unavailable.', { title: 'Copy share link', defaultValue: url, confirmLabel: 'Done' }); }
+  }
+
+  async function revokeShare(share: ShareLink) {
+    if (!await confirmAction('Revoke this ' + share.permission + ' link? Anyone using it will lose access.', { title: 'Revoke share link', confirmLabel: 'Revoke link', destructive: true })) return;
+    const response = await fetch('/api/drawings/' + encodeURIComponent(boardId) + '/shares', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: share.token }) });
+    if (response.ok) shares = shares.filter((item) => item.token !== share.token);
+    else shareError = 'Could not revoke share link';
+  }
+
   onMount(() => {
     try {
       const raw = localStorage.getItem('excali_preferences');
       if (raw) {
-        const prefs = JSON.parse(raw) as { autosaveSeconds?: number; editorAutoHide?: boolean };
+        const prefs = JSON.parse(raw) as { autosaveSeconds?: number };
         if (typeof prefs.autosaveSeconds === 'number') autosaveDelay = Math.min(3, Math.max(1, prefs.autosaveSeconds));
-        editorAutoHide = prefs.editorAutoHide === true;
       }
     } catch { /* Browser preferences are optional. */ }
     void (async () => {
@@ -233,16 +303,11 @@
   <div class="editor-area">
     {#if ready}
       {#key editorKey}
-        <ExcalidrawEditor initialData={scene} onSave={saveScene} onRemoteScene={(apply) => { applyRemoteScene = apply; if (pendingRemoteScene) { apply(pendingRemoteScene); pendingRemoteScene = null; } }} />
+        <ExcalidrawEditor bind:title onTitleCommit={renameDrawing} onHistory={() => void loadHistory()} onShare={() => void openShare()} initialData={scene} onSave={saveScene} onRemoteScene={(apply) => { applyRemoteScene = apply; if (pendingRemoteScene) { apply(pendingRemoteScene); pendingRemoteScene = null; } }} />
       {/key}
     {:else}
       <div class="loading" role="status">{status}</div>
     {/if}
-  </div>
-  <div class="editor-topbar" class:autohide={editorAutoHide}>
-    <a href="/" class="back" aria-label="Back to dashboard">←</a>
-    <input aria-label="Drawing title" maxlength="160" bind:value={title} onblur={renameDrawing} onkeydown={(event) => { if (event.key === 'Enter') (event.currentTarget as HTMLInputElement).blur(); }} />
-    <button class="top-button" onclick={() => void loadHistory()}>History</button>
   </div>
 
   {#if showHistory}
@@ -262,6 +327,36 @@
       </div>
     </div>
   {/if}
+
+  {#if showShare}
+    <div class="history-overlay" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) showShare = false; }}>
+      <div class="history-panel" role="dialog" aria-modal="true" aria-labelledby="share-title" tabindex="-1">
+        <div class="history-heading"><div><h2 id="share-title">Share drawing</h2><p>{title}</p></div><button class="top-button" onclick={() => showShare = false} aria-label="Close share">×</button></div>
+        <div class="share-form">
+          <label for="share-permission">Access</label>
+          <select id="share-permission" bind:value={sharePermission}><option value="edit">Can edit</option><option value="view">Can view</option></select>
+          <label for="share-expiry">Expiration</label>
+          <select id="share-expiry" bind:value={shareExpiry}><option value="never">Never</option><option value="1">1 day</option><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select>
+          <button class="primary" onclick={() => void createShare()} disabled={creatingShare}>{creatingShare ? 'Creating…' : 'Create share link'}</button>
+        </div>
+        {#if shareError}<p class="share-message" role="status">{shareError}</p>{/if}
+        {#if collaborators > 1}<p class="share-message">{collaborators} people are in this drawing right now.</p>{/if}
+        <h3 class="share-heading">Active links</h3>
+        {#if shareLoading}<p class="history-empty">Loading links…</p>
+        {:else if shares.length === 0}<p class="history-empty">No active links. Create one above.</p>
+        {:else}
+          <div class="share-list">
+            {#each shares as share (share.token)}
+              <div class="share-item">
+                <div class="share-meta"><strong>{share.permission === 'edit' ? 'Can edit' : 'Can view'}</strong><small>{formatExpiry(share.expires_at)}</small><input readonly value={location.origin + '/share/' + share.token} aria-label="Share URL" onclick={(event) => (event.currentTarget as HTMLInputElement).select()} /></div>
+                <div class="share-actions"><button class="top-button" onclick={() => void copyShare(share)}>Copy</button><button class="top-button danger" onclick={() => void revokeShare(share)}>Revoke</button></div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -269,15 +364,10 @@
   :global(body) { background: #fff; }
   main { position: relative; width: 100%; height: 100dvh; }
   .loading { display: grid; height: 100%; place-items: center; color: #64748b; font: 14px system-ui, sans-serif; }
-  .editor-area { position: absolute; inset: 56px 0 0; min-height: 0; }
-  .editor-topbar { position: absolute; z-index: 10; inset: 0 0 auto; box-sizing: border-box; height: 56px; display: flex; align-items: center; gap: 7px; padding: 8px 12px; border-bottom: 1px solid #dbe1ea; background: #fff; }
-  .editor-topbar.autohide { opacity: .14; transform: translateY(-72%); transition: opacity .18s ease, transform .18s ease; }
-  .editor-topbar.autohide:hover, .editor-topbar.autohide:focus-within { opacity: 1; transform: translateY(0); }
-  .back, .top-button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; padding: 5px 9px; border: 1px solid #dbe1ea; border-radius: 8px; background: #fff; color: #334155; font: 600 12px system-ui, sans-serif; text-decoration: none; cursor: pointer; }
-  .editor-topbar input { width: min(260px, 42vw); min-width: 80px; border: 1px solid transparent; border-radius: 7px; padding: 7px 8px; outline: none; color: #1e293b; background: transparent; font: 600 13px system-ui, sans-serif; }
-  .editor-topbar input:focus { border-color: #a5b4fc; background: #fff; }
-  .top-button:hover, .back:hover { background: #eef2ff; border-color: #818cf8; }
-  .history-overlay { position: absolute; z-index: 30; inset: 0; display: grid; justify-items: end; background: #0f172a55; }
+  .editor-area { position: absolute; inset: 0; min-height: 0; }
+  .top-button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; padding: 5px 9px; border: 1px solid #dbe1ea; border-radius: 8px; background: #fff; color: #334155; font: 600 12px system-ui, sans-serif; text-decoration: none; cursor: pointer; }
+  .top-button:hover { background: #eef2ff; border-color: #818cf8; }
+  .history-overlay { position: absolute; z-index: 30; inset: 0; display: grid; justify-items: end; background: rgb(0 0 0 / .4); }
   .history-panel { box-sizing: border-box; width: min(440px, 100%); height: 100%; overflow: auto; padding: 24px; border-left: 2px solid #1e293b; background: #f8fafc; box-shadow: -4px 0 0 #1e293b25; }
   .history-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
   .history-heading h2 { margin: 0 0 7px; color: #0f172a; font: 400 28px 'Excalifont', system-ui, sans-serif; }
@@ -289,5 +379,30 @@
   .history-item small { color: #64748b; font: 11px system-ui, sans-serif; }
   .history-item button:disabled { opacity: .6; cursor: wait; }
   .history-error { padding: 10px; border: 1px solid #fecdd3; border-radius: 8px; background: #fff1f2; color: #9f1239; font: 13px system-ui, sans-serif; }
-  @media (max-width: 520px) { .editor-topbar { padding: 8px; } .editor-topbar input { width: 25vw; } .history-panel { padding: 18px; } }
+  .share-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; padding: 14px; border: 2px solid #e2e8f0; border-radius: 14px; background: #fff; }
+  .share-form label { align-self: end; color: #475569; font: 800 12px system-ui, sans-serif; }
+  .share-form select { padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #1e293b; font: 600 13px system-ui, sans-serif; }
+  .share-form .primary { grid-column: 1 / -1; min-height: 36px; margin-top: 4px; border: 2px solid #1e293b; border-radius: 10px; background: #6965db; color: #fff; font: 700 13px system-ui, sans-serif; cursor: pointer; }
+  .share-form .primary:disabled { opacity: .6; cursor: wait; }
+  .share-message { margin: 10px 0 0; color: #475569; font: 12px/1.5 system-ui, sans-serif; }
+  .share-heading { margin: 22px 0 10px; color: #0f172a; font: 700 13px system-ui, sans-serif; }
+  .share-list { display: grid; gap: 10px; }
+  .share-item { display: grid; gap: 10px; padding: 12px; border: 2px solid #1e293b; border-radius: 12px; background: #fff; box-shadow: 2px 2px 0 #1e293b; }
+  .share-meta { display: grid; gap: 5px; min-width: 0; }
+  .share-meta strong { color: #1e293b; font: 700 13px system-ui, sans-serif; }
+  .share-meta small { color: #64748b; font: 11px system-ui, sans-serif; }
+  .share-meta input { box-sizing: border-box; width: 100%; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; color: #334155; font: 12px ui-monospace, monospace; }
+  .share-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .top-button.danger { color: #be123c; border-color: #fecdd3; }
+  .top-button.danger:hover { background: #fff1f2; border-color: #fb7185; }
+  :global(html[data-theme="dark"]) .history-overlay { background: rgb(0 0 0 / .6); }
+  :global(html[data-theme="dark"]) .history-panel { background: #171717; border-left-color: #404040; box-shadow: -4px 0 0 #00000040; }
+  :global(html[data-theme="dark"]) .history-heading p, :global(html[data-theme="dark"]) .history-empty, :global(html[data-theme="dark"]) .share-message, :global(html[data-theme="dark"]) .share-meta small { color: #a3a3a3; }
+  :global(html[data-theme="dark"]) .history-item, :global(html[data-theme="dark"]) .share-item { background: #262626; border-color: #525252; box-shadow: 2px 2px 0 #404040; }
+  :global(html[data-theme="dark"]) .history-item strong, :global(html[data-theme="dark"]) .share-meta strong, :global(html[data-theme="dark"]) .share-heading { color: #f5f5f5; }
+  :global(html[data-theme="dark"]) .top-button { background: #262626; border-color: #525252; color: #e5e5e5; }
+  :global(html[data-theme="dark"]) .top-button:hover { background: #333; border-color: #6366f1; }
+  :global(html[data-theme="dark"]) .top-button.danger { color: #fda4af; }
+  :global(html[data-theme="dark"]) .share-form .primary { border-color: #525252; }
+  @media (max-width: 520px) { .history-panel { padding: 18px; } .share-form { grid-template-columns: 1fr; } }
 </style>

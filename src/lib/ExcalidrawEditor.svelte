@@ -2,11 +2,53 @@
   import { onMount } from 'svelte';
   import { compressExcalidrawFiles, type ExcalidrawFileRecord } from '$lib/imageCompression';
 
-  let { initialData = null, onSave, onRemoteScene, viewOnly = false, langCode = 'en' }: { initialData?: unknown; onSave?: (scene: unknown) => void; onRemoteScene?: (apply: (scene: unknown) => void) => void; viewOnly?: boolean; langCode?: string } = $props();
+  let { initialData = null, onSave, onRemoteScene, viewOnly = false, langCode = 'en', title = $bindable(), onTitleCommit, onHistory, onShare }: { initialData?: unknown; onSave?: (scene: unknown) => void; onRemoteScene?: (apply: (scene: unknown) => void) => void; viewOnly?: boolean; langCode?: string; title?: string; onTitleCommit?: () => void; onHistory?: () => void; onShare?: () => void } = $props();
   let host: HTMLDivElement;
+  let shell: HTMLDivElement;
   let error = $state('');
+  // Drawing title shown next to Excalidraw's main-menu button. Excalidraw 0.18 has no
+  // "top left" slot, so the position is measured from the menu trigger button itself.
+  let titlePos = $state<{ left: number; top: number } | null>(null);
+  let resolvedTheme = $state<'light' | 'dark'>('light');
+  let titleFocused = $state(false);
+  let titleOnFocus = '';
+  const titleColors = $derived(resolvedTheme === 'dark'
+    ? { text: '#e3e3e8', underline: '#a8a5ff' }
+    : { text: '#1b1b1f', underline: '#6965db' });
+  const titleStyle = $derived(
+    'background:transparent !important;box-shadow:none !important;border:0 !important;border-radius:0 !important;'
+    + 'border-bottom:2px solid ' + (titleFocused ? titleColors.underline : 'transparent') + ' !important;'
+    + 'color:' + titleColors.text + ' !important;'
+    + 'width:' + Math.min(Math.max((title?.length ?? 0) + 1, 6), 40) + 'ch;'
+  );
 
   onMount(() => {
+    let measureFrame = 0;
+    const measureTitle = () => {
+      measureFrame = 0;
+      const trigger = host?.querySelector('[data-testid="main-menu-trigger"]') as HTMLElement | null;
+      if (!trigger || !shell) { if (titlePos) titlePos = null; return; }
+      const shellRect = shell.getBoundingClientRect();
+      const triggerRect = trigger.getBoundingClientRect();
+      if (triggerRect.width === 0) { if (titlePos) titlePos = null; return; }
+      const left = Math.round(triggerRect.right - shellRect.left + 10);
+      const top = Math.round(triggerRect.top - shellRect.top + triggerRect.height / 2);
+      if (!titlePos || titlePos.left !== left || titlePos.top !== top) titlePos = { left, top };
+    };
+    const scheduleMeasure = () => { if (!measureFrame) measureFrame = requestAnimationFrame(measureTitle); };
+    const mutationObserver = new MutationObserver(scheduleMeasure);
+    mutationObserver.observe(host, { childList: true, subtree: true });
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    resizeObserver.observe(shell);
+    window.addEventListener('resize', scheduleMeasure);
+    scheduleMeasure();
+    const stopMeasure = () => {
+      mutationObserver.disconnect();
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', scheduleMeasure);
+      if (measureFrame) cancelAnimationFrame(measureFrame);
+    };
+
     let root: import('react-dom/client').Root | undefined;
     let disposed = false;
     let cleanupTheme: (() => void) | undefined;
@@ -57,11 +99,13 @@
         const storedThemeMode = localStorage.getItem('drawflare-theme-mode');
         let currentThemeMode: ThemeMode = storedThemeMode === 'dark' || storedThemeMode === 'light' || storedThemeMode === 'system' ? storedThemeMode : 'system';
         let setThemeToggleMode: ((mode: ThemeMode) => void) | null = null;
+        resolvedTheme = currentThemeMode === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : currentThemeMode;
         const applyThemeMode = (nextMode: ThemeMode) => {
           currentThemeMode = nextMode;
           localStorage.setItem('drawflare-theme-mode', nextMode);
           const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
           const theme: 'dark' | 'light' = nextMode === 'system' ? (systemDark ? 'dark' : 'light') : nextMode;
+          resolvedTheme = theme;
           // Keep the canvas default in sync with the selected editor theme, without
           // overwriting a custom background chosen from Excalidraw's canvas menu.
           const currentBackground = excalidrawApi?.getAppState?.()?.viewBackgroundColor;
@@ -128,6 +172,29 @@
           })(),
           langCode: savedLangCode,
           viewModeEnabled: viewOnly,
+          // Rendered by Excalidraw directly to the left of its "Library" button.
+          renderTopRightUI: (isMobile: boolean) => {
+            if (!onHistory && !onShare) return null;
+            const icon = (nodes: any[]) => React.createElement('svg', { viewBox: '0 0 24 24', 'aria-hidden': true, fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }, ...nodes);
+            const button = (key: string, label: string, nodes: any[], onClick?: () => void) => React.createElement(
+              'button',
+              { key, type: 'button', className: 'drawflare-top-button', title: label, 'aria-label': label, onClick: () => onClick?.() },
+              icon(nodes),
+              isMobile ? null : React.createElement('span', null, label)
+            );
+            return React.createElement('div', { className: 'drawflare-top-actions' },
+              onHistory ? button('history', 'History', [
+                React.createElement('circle', { key: 'face', cx: 12, cy: 12, r: 9 }),
+                React.createElement('path', { key: 'hands', d: 'M12 7v5l3 2' })
+              ], onHistory) : null,
+              onShare ? button('share', 'Share', [
+                React.createElement('circle', { key: 'a', cx: 18, cy: 5, r: 3 }),
+                React.createElement('circle', { key: 'b', cx: 6, cy: 12, r: 3 }),
+                React.createElement('circle', { key: 'c', cx: 18, cy: 19, r: 3 }),
+                React.createElement('path', { key: 'l1', d: 'M8.6 13.5l6.8 4M15.4 6.5l-6.8 4' })
+              ], onShare) : null
+            );
+          },
           children: React.createElement(MainMenu, null,
             React.createElement(MainMenu.Group, {
               title: 'Workspace',
@@ -199,19 +266,46 @@
 
     return () => {
       disposed = true;
+      stopMeasure();
       cleanupTheme?.();
       root?.unmount();
     };
   });
 </script>
 
-<div class="editor" bind:this={host}></div>
-{#if error}
-  <div class="error" role="alert">Excalidraw failed to load: {error}</div>
-{/if}
+<div class="editor-shell" bind:this={shell}>
+  <div class="editor" bind:this={host}></div>
+  {#if title !== undefined}
+    <div class="title-overlay" style:left={titlePos ? titlePos.left + 'px' : '0'} style:top={titlePos ? titlePos.top + 'px' : '0'} style:visibility={titlePos ? 'visible' : 'hidden'}>
+      <input
+        class="title-input"
+        aria-label="Drawing title"
+        title="Click to rename"
+        maxlength="160"
+        spellcheck="false"
+        bind:value={title}
+        style={titleStyle}
+        onfocus={() => { titleFocused = true; titleOnFocus = title ?? ''; }}
+        onblur={() => { titleFocused = false; onTitleCommit?.(); }}
+        onkeydown={(event) => {
+          event.stopPropagation();
+          const input = event.currentTarget as HTMLInputElement;
+          if (event.key === 'Enter') input.blur();
+          else if (event.key === 'Escape') { title = titleOnFocus; input.blur(); }
+        }}
+      />
+    </div>
+  {/if}
+  {#if error}
+    <div class="error" role="alert">Excalidraw failed to load: {error}</div>
+  {/if}
+</div>
 
 <style>
+  .editor-shell { position: relative; width: 100%; height: 100%; min-height: 0; }
   .editor { width: 100%; height: 100%; min-height: 0; }
+  .title-overlay { position: absolute; z-index: 6; display: flex; align-items: center; transform: translateY(-50%); max-width: clamp(90px, calc(50vw - 330px), 320px); }
+  .title-input { box-sizing: content-box; max-width: 100%; min-width: 0; margin: 0; padding: 3px 1px 1px; outline: none; font: 600 15px/1.3 system-ui, sans-serif; text-overflow: ellipsis; transition: border-color 120ms ease; }
   .editor :global(.excalidraw) { height: 100%; }
   .error { position: absolute; inset: auto 1rem 1rem; z-index: 20; color: #b91c1c; background: white; padding: .75rem; border: 1px solid #fecaca; border-radius: .5rem; }
 </style>

@@ -195,4 +195,11 @@
   :global(.excalidraw.excalidraw .dropdown-menu) { color: var(--color-on-surface) !important; }
   :global(.excalidraw.excalidraw [data-testid="canvas-background-label"]) { color: var(--color-on-surface) !important; }
   :global(.excalidraw.excalidraw .dropdown-menu .color-picker__button.color-picker__button) { background-color: var(--swatch-color) !important; border: 1px solid var(--color-gray-30) !important; }
+  /* History / Share buttons rendered via Excalidraw's renderTopRightUI, next to the Library trigger. */
+  :global(.excalidraw .drawflare-top-actions) { display: flex; align-items: center; gap: .5rem; }
+  :global(.excalidraw .drawflare-top-button) { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; box-sizing: border-box; height: 2.25rem; min-width: 2.25rem; padding: 0 .75rem; border: 0; border-radius: var(--border-radius-lg, .5rem); background: var(--island-bg-color); color: var(--color-on-surface); box-shadow: var(--shadow-island); font: 500 .75rem/1 var(--ui-font, system-ui, sans-serif); white-space: nowrap; cursor: pointer; }
+  :global(.excalidraw .drawflare-top-button svg) { width: 1.1rem; height: 1.1rem; flex: 0 0 auto; }
+  :global(.excalidraw .drawflare-top-button:hover) { background: var(--button-hover-bg, var(--island-bg-color)); }
+  :global(.excalidraw .drawflare-top-button:active) { box-shadow: 0 0 0 1px var(--color-brand-active, #6965db); }
+  :global(.excalidraw .drawflare-top-button:focus-visible) { outline: 2px solid var(--focus-highlight-color, #a5d8ff); outline-offset: 1px; }
 </style>
