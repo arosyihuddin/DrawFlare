@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite dev --host 0.0.0.0",
     "build": "vite build",
-    "preview": "wrangler dev --config wrangler.dev.toml",
+    "preview": "wrangler dev --config wrangler.preview.toml",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "deploy": "bun run check && bun run build && wrangler deploy",
     "db:local": "wrangler d1 migrations apply drawflare-db --local",
@@ -18,6 +18,7 @@
     "@sveltejs/vite-plugin-svelte": "^6.2.0",
     "clsx": "^2.1.1",
     "fflate": "^0.8.3",
+    "fractional-indexing": "^4.0.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "svelte": "^5.38.0",

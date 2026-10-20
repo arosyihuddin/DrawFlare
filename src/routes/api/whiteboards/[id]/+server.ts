@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { readScene, removeSceneAsset, storeScene } from '$lib/server/scenes';
+import { validateDrawingScene } from '$lib/server/validateDrawingScene';
 
 type BoardRow = { id: string; title: string; scene_json: string; created_at: string; updated_at: string; revision: number };
 
@@ -23,9 +24,9 @@ export const PUT: RequestHandler = async ({ params, request, platform, locals })
   const database = platform?.env?.DB;
   if (!database) return json({ error: 'D1 binding DB is not configured' }, { status: 503 });
   const body = await request.json().catch(() => null) as { title?: unknown; scene?: unknown; expectedRevision?: unknown } | null;
-  if (!body || body.scene === undefined || typeof body.scene !== 'object' || body.scene === null || Array.isArray(body.scene)) {
-    return json({ error: 'Expected scene to be a JSON object' }, { status: 400 });
-  }
+  if (!body) return json({ error: 'Expected a JSON object containing scene' }, { status: 400 });
+  const sceneError = validateDrawingScene(body.scene);
+  if (sceneError) return json({ error: sceneError }, { status: 400 });
   if (body.expectedRevision !== undefined && (!Number.isInteger(body.expectedRevision) || Number(body.expectedRevision) < 1)) {
     return json({ error: 'expectedRevision must be a positive integer' }, { status: 400 });
   }

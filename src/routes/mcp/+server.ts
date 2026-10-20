@@ -1,6 +1,7 @@
 import type { RequestHandler } from './$types';
 import { resolveOwnerId } from '$lib/server/auth';
 import { readScene, removeSceneAsset, storeScene } from '$lib/server/scenes';
+import { validateDrawingScene } from '$lib/server/validateDrawingScene';
 
 type JsonRpcRequest = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
 const tools = [
@@ -151,7 +152,8 @@ export const POST: RequestHandler = async ({ request, platform }) => {
       return rpc(id, { content: [{ type: 'text', text: JSON.stringify({ id: row.id, title: row.title, scene, revision: row.revision, created_at: row.created_at, updated_at: row.updated_at }) }] });
     }
     if (name === 'save_drawing' || name === 'save_whiteboard') {
-      if (args.scene === undefined || typeof args.scene !== 'object' || args.scene === null || Array.isArray(args.scene)) return error(id, -32602, 'scene must be a JSON object');
+      const sceneError = validateDrawingScene(args.scene);
+      if (sceneError) return error(id, -32602, sceneError);
       if (args.expectedRevision !== undefined && (!Number.isInteger(args.expectedRevision) || Number(args.expectedRevision) < 1)) return error(id, -32602, 'expectedRevision must be a positive integer');
       const title = typeof args.title === 'string' ? args.title.trim().slice(0, 160) : undefined;
       const boardId = String(args.id ?? crypto.randomUUID());

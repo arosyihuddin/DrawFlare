@@ -21,7 +21,8 @@ export class CollaborationRoom extends DurableObject<CollaborationRoomEnv> {
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
-    this.state.acceptWebSocket(server);
+    const permission = new URL(request.url).searchParams.get('permission') === 'view' ? 'view' : 'edit';
+    this.state.acceptWebSocket(server, [permission]);
     this.broadcast({ type: 'presence', count: this.state.getWebSockets().length });
     return new Response(null, { status: 101, webSocket: client } as ResponseInit);
   }
@@ -32,10 +33,12 @@ export class CollaborationRoom extends DurableObject<CollaborationRoomEnv> {
     try { payload = JSON.parse(message) as { type?: string }; }
     catch { return; }
     if (!payload || !['scene', 'request-scene', 'presence'].includes(payload.type ?? '')) return;
-    for (const peer of this.state.getWebSockets()) {
-      if (peer === socket) continue;
-      try { peer.send(message); } catch { /* Closed peers are removed by the runtime. */ }
-    }
+    if (payload.type === 'scene' && this.state.getTags(socket).includes('view')) return;
+    if (payload.type === 'presence' && this.state.getTags(socket).includes('view')) return;
+     for (const peer of this.state.getWebSockets()) {
+       if (peer === socket) continue;
+       try { peer.send(message); } catch { /* Closed peers are removed by the runtime. */ }
+     }
   }
 
   webSocketClose(socket: WebSocket): void {

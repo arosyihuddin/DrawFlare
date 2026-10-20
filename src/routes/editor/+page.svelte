@@ -9,6 +9,7 @@
   let revision = $state(1);
   let scene = $state<unknown>({ elements: [], appState: {}, files: {} });
   let status = $state('Loading drawing…');
+  let errorDetails = $state('');
   let ready = $state(false);
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let saveInFlight = false;
@@ -74,9 +75,10 @@
       if (collaborationSocket?.readyState === WebSocket.OPEN) { try { collaborationSocket.send(JSON.stringify({ type: 'scene', scene, revision })); } catch { /* Realtime is best effort; the save is already durable. */ } }
       status = 'Saved';
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Save failed';
+      const message = error instanceof Error ? (error.stack ?? error.message) : 'Save failed: ' + String(error);
       if (message.toLowerCase().includes('changed')) conflictDetected = true;
-      status = message;
+      status = error instanceof Error ? error.message : 'Save failed';
+      errorDetails = 'DrawFlare save error\n' + message;
     } finally {
       saveInFlight = false;
       if (saveAgain && !conflictDetected) { saveAgain = false; void persistScene(); }
@@ -288,6 +290,7 @@
         else await createDrawing();
       } catch (error) {
         status = error instanceof Error ? error.message : 'Failed to open drawing';
+        errorDetails = 'DrawFlare open error\n' + (error instanceof Error ? (error.stack ?? error.message) : String(error));
       }
     })();
     return () => { if (saveTimer) clearTimeout(saveTimer); collaborationSocket?.close(); localChannel?.close(); };
@@ -309,6 +312,24 @@
       <div class="loading" role="status">{status}</div>
     {/if}
   </div>
+  {#if errorDetails}
+    <div class="error-overlay" role="presentation">
+      <div class="error-dialog" role="alertdialog" aria-modal="true" aria-labelledby="save-error-title" tabindex="-1">
+        <div class="error-heading">
+          <div class="error-icon">!</div>
+          <div>
+            <h2 id="save-error-title">Drawing error detected</h2>
+            <p>The operation failed. Copy the diagnostic details and send them to your AI agent.</p>
+          </div>
+        </div>
+        <pre class="error-details">{errorDetails}</pre>
+        <div class="error-actions">
+          <button type="button" class="error-copy" onclick={() => void navigator.clipboard.writeText(errorDetails)}>Copy Error</button>
+          <button type="button" class="error-close" onclick={() => { errorDetails = ''; }}>Close</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   {#if showHistory}
     <div class="history-overlay" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) showHistory = false; }}>
@@ -405,4 +426,19 @@
   :global(html[data-theme="dark"]) .top-button.danger { color: #fda4af; }
   :global(html[data-theme="dark"]) .share-form .primary { border-color: #525252; }
   @media (max-width: 520px) { .history-panel { padding: 18px; } .share-form { grid-template-columns: 1fr; } }
+  .error-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgb(15 23 42 / .55); }
+  .error-dialog { box-sizing: border-box; width: min(560px, 100%); max-height: min(80dvh, 680px); overflow: auto; padding: 22px; border: 1px solid #fecaca; border-radius: 14px; background: #fff; color: #1f2937; box-shadow: 0 24px 80px rgb(0 0 0 / .25); }
+  .error-heading { display: flex; align-items: flex-start; gap: 12px; }
+  .error-icon { display: grid; flex: 0 0 32px; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: #fee2e2; color: #b91c1c; font: 800 20px system-ui, sans-serif; }
+  .error-heading h2 { margin: 0; font: 700 18px/1.35 system-ui, sans-serif; }
+  .error-heading p { margin: 5px 0 0; color: #64748b; font: 13px/1.5 system-ui, sans-serif; }
+  .error-details { box-sizing: border-box; max-height: 42dvh; overflow: auto; margin: 18px 0; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #334155; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+  .error-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .error-actions button { min-height: 36px; padding: 7px 13px; border-radius: 8px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  .error-copy { border: 1px solid #4f46e5; background: #4f46e5; color: white; }
+  .error-close { border: 1px solid #cbd5e1; background: white; color: #334155; }
+  :global(html[data-theme="dark"]) .error-dialog { border-color: #7f1d1d; background: #171717; color: #f5f5f5; }
+  :global(html[data-theme="dark"]) .error-heading p { color: #a3a3a3; }
+  :global(html[data-theme="dark"]) .error-details { border-color: #404040; background: #262626; color: #e5e5e5; }
+  :global(html[data-theme="dark"]) .error-close { border-color: #525252; background: #262626; color: #e5e5e5; }
 </style>

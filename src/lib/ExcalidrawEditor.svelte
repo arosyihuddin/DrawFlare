@@ -42,16 +42,27 @@
     resizeObserver.observe(shell);
     window.addEventListener('resize', scheduleMeasure);
     scheduleMeasure();
+    const captureWindowError = (event: ErrorEvent) => {
+      error = [event.message || 'Uncaught browser error', event.filename ? event.filename + ':' + event.lineno + ':' + event.colno : '', event.error instanceof Error ? event.error.stack ?? event.error.message : ''].filter(Boolean).join('\n');
+    };
+    const captureUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      error = reason instanceof Error ? (reason.stack ?? reason.message) : 'Unhandled promise rejection: ' + String(reason);
+    };
+    window.addEventListener('error', captureWindowError);
+    window.addEventListener('unhandledrejection', captureUnhandledRejection);
+
+    let root: import('react-dom/client').Root | undefined;
+    let disposed = false;
+    let cleanupTheme: (() => void) | undefined;
     const stopMeasure = () => {
       mutationObserver.disconnect();
       resizeObserver.disconnect();
       window.removeEventListener('resize', scheduleMeasure);
       if (measureFrame) cancelAnimationFrame(measureFrame);
+      window.removeEventListener('error', captureWindowError);
+      window.removeEventListener('unhandledrejection', captureUnhandledRejection);
     };
-
-    let root: import('react-dom/client').Root | undefined;
-    let disposed = false;
-    let cleanupTheme: (() => void) | undefined;
     let applyingRemote = false;
     let pendingRemoteValue: unknown;
     let hasPendingRemoteValue = false;
@@ -260,7 +271,7 @@
         });
         root.render(editorElement);
       } catch (e) {
-        error = e instanceof Error ? e.message : 'Failed to load Excalidraw';
+        error = e instanceof Error ? (e.stack ?? e.message) : 'Failed to load Excalidraw: ' + String(e);
       }
     })();
 
@@ -297,7 +308,22 @@
     </div>
   {/if}
   {#if error}
-    <div class="error" role="alert">Excalidraw failed to load: {error}</div>
+    <div class="error-overlay" role="presentation">
+        <div class="error-dialog" role="alertdialog" aria-modal="true" aria-labelledby="editor-error-title" tabindex="-1">
+        <div class="error-heading">
+          <div class="error-icon">!</div>
+          <div>
+            <h2 id="editor-error-title">Drawing error detected</h2>
+            <p>Copy the diagnostic details and send them to your AI agent.</p>
+          </div>
+        </div>
+        <pre class="error-details">{error}</pre>
+        <div class="error-actions">
+          <button type="button" class="error-copy" onclick={() => void navigator.clipboard.writeText('DrawFlare editor error\n' + error)}>Copy Error</button>
+          <button type="button" class="error-close" onclick={() => { error = ''; }}>Close</button>
+        </div>
+        </div>
+    </div>
   {/if}
 </div>
 
@@ -307,5 +333,19 @@
   .title-overlay { position: absolute; z-index: 6; display: flex; align-items: center; transform: translateY(-50%); max-width: clamp(90px, calc(50vw - 330px), 320px); }
   .title-input { box-sizing: content-box; max-width: 100%; min-width: 0; margin: 0; padding: 3px 1px 1px; outline: none; font: 600 15px/1.3 system-ui, sans-serif; text-overflow: ellipsis; transition: border-color 120ms ease; }
   .editor :global(.excalidraw) { height: 100%; }
-  .error { position: absolute; inset: auto 1rem 1rem; z-index: 20; color: #b91c1c; background: white; padding: .75rem; border: 1px solid #fecaca; border-radius: .5rem; }
+  .error-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 20px; background: rgb(15 23 42 / .55); }
+  .error-dialog { box-sizing: border-box; width: min(560px, 100%); max-height: min(80dvh, 680px); overflow: auto; padding: 22px; border: 1px solid #fecaca; border-radius: 14px; background: #fff; color: #1f2937; box-shadow: 0 24px 80px rgb(0 0 0 / .25); }
+  .error-heading { display: flex; align-items: flex-start; gap: 12px; }
+  .error-icon { display: grid; flex: 0 0 32px; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: #fee2e2; color: #b91c1c; font: 800 20px system-ui, sans-serif; }
+  .error-heading h2 { margin: 0; font: 700 18px/1.35 system-ui, sans-serif; }
+  .error-heading p { margin: 5px 0 0; color: #64748b; font: 13px/1.5 system-ui, sans-serif; }
+  .error-details { box-sizing: border-box; max-height: 42dvh; overflow: auto; margin: 18px 0; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #334155; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; }
+  .error-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .error-actions button { min-height: 36px; padding: 7px 13px; border-radius: 8px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+  .error-copy { border: 1px solid #4f46e5; background: #4f46e5; color: white; }
+  .error-close { border: 1px solid #cbd5e1; background: white; color: #334155; }
+  :global(html[data-theme="dark"]) .error-dialog { border-color: #7f1d1d; background: #171717; color: #f5f5f5; }
+  :global(html[data-theme="dark"]) .error-heading p { color: #a3a3a3; }
+  :global(html[data-theme="dark"]) .error-details { border-color: #404040; background: #262626; color: #e5e5e5; }
+  :global(html[data-theme="dark"]) .error-close { border-color: #525252; background: #262626; color: #e5e5e5; }
 </style>
