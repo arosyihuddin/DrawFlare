@@ -402,7 +402,7 @@
   </header>
   {#if mobileSidebarOpen}<button class="mobile-sidebar-backdrop" aria-label="Close navigation menu" onclick={() => mobileSidebarOpen = false}></button>{/if}
   <aside class="sidebar" class:mobile-open={mobileSidebarOpen}>
-    <a href="/" class="sidebar-brand" aria-label="DrawFlare home"><span class="brand-mark"><img src="/drawflare-logo.svg" alt="" /></span><span class="brand-name">DrawFlare</span><span class="beta">Beta</span></a>
+    <a href="/" class="sidebar-brand" aria-label="DrawFlare home"><span class="brand-mark"><img src="/drawflare-logo.svg" alt="" /></span><span class="brand-name">DrawFlare</span></a>
     <div class="sidebar-scroll">
     <div class="sidebar-section-label">LIBRARY</div>
     <button class:active={view === 'all' && selectedCollection === 'all'} class="nav-item" onclick={() => void changeView('all')}><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> <span>All drawings</span></button>
