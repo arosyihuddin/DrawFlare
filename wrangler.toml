@@ -1,0 +1,31 @@
+name = "drawflare-worker"
+main = "worker.ts"
+compatibility_date = "2026-10-20"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[assets]
+directory = ".svelte-kit/cloudflare"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "drawflare-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "drawflare-files"
+
+[vars]
+APP_NAME = "DrawFlare"
+MCP_SERVER_NAME = "drawflare-worker-mcp"
+
+[[durable_objects.bindings]]
+name = "COLLABORATION_ROOMS"
+class_name = "CollaborationRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CollaborationRoom"]
